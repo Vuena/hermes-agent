@@ -4,7 +4,7 @@ import { atom, computed } from 'nanostores'
 import { lastVisibleMessageIsUser } from '@/app/chat/thread-loading'
 import type { ContextSuggestion } from '@/app/types'
 import type { HermesConnection } from '@/global'
-import type { ChatMessage } from '@/lib/chat-messages'
+import { type ChatMessage, windowChatMessages } from '@/lib/chat-messages'
 import { persistBoolean, persistString, storedBoolean, storedString } from '@/lib/storage'
 import type { SessionInfo, UsageStats } from '@/types/hermes'
 
@@ -494,7 +494,11 @@ export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
   }
 }
 
-export const setMessages = (next: Updater<ChatMessage[]>) => updateAtom($messages, next)
+export const setMessages = (next: Updater<ChatMessage[]>) => {
+  const resolved = typeof next === 'function' ? (next as (current: ChatMessage[]) => ChatMessage[])($messages.get()) : next
+
+  $messages.set(windowChatMessages(resolved))
+}
 export const setFreshDraftReady = (next: Updater<boolean>) => updateAtom($freshDraftReady, next)
 export const setResumeFailedSessionId = (next: Updater<string | null>) => updateAtom($resumeFailedSessionId, next)
 export const setResumeExhaustedSessionId = (next: Updater<string | null>) => updateAtom($resumeExhaustedSessionId, next)

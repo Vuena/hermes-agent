@@ -2397,6 +2397,20 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 # Non-lock error — propagate.
                 raise
             except sqlite3.DatabaseError as exc:
+                # CPython's sqlite wrapper can surface this transient cursor
+                # invalidation when another thread used the same connection
+                # while a statement was active. Runtime reads should use
+                # _read_ctx(), but retry here as a final durability guard so a
+                # single race cannot abort and discard an otherwise valid turn.
+                if "no more rows available" in str(exc).lower():
+                    now = time.monotonic()
+                    if now < deadline:
+                        time.sleep(min(random.uniform(
+                            self._WRITE_RETRY_MIN_S,
+                            self._WRITE_RETRY_MAX_S,
+                        ), max(deadline - now, 0.001)))
+                        continue
+                    raise
                 # Corrupt FTS shadow tables make every write raise the
                 # malformed/corrupt error class through the FTS sync triggers
                 # while the canonical messages table is intact. The gateway
@@ -3702,11 +3716,12 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         if not session_id:
             return None
         now = time.time()
-        row = self._conn.execute(
-            "SELECT holder FROM compression_locks "
-            "WHERE session_id = ? AND expires_at >= ?",
-            (session_id, now),
-        ).fetchone()
+        with self._read_ctx() as conn:
+            row = conn.execute(
+                "SELECT holder FROM compression_locks "
+                "WHERE session_id = ? AND expires_at >= ?",
+                (session_id, now),
+            ).fetchone()
         if row is None:
             return None
         return row["holder"] if isinstance(row, sqlite3.Row) else row[0]
@@ -8524,12 +8539,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         no handoff record.
         """
         try:
-            cur = self._conn.execute(
-                "SELECT handoff_state, handoff_platform, handoff_error "
-                "FROM sessions WHERE id = ?",
-                (session_id,),
-            )
-            row = cur.fetchone()
+            with self._read_ctx() as conn:
+                cur = conn.execute(
+                    "SELECT handoff_state, handoff_platform, handoff_error "
+                    "FROM sessions WHERE id = ?",
+                    (session_id,),
+                )
+                row = cur.fetchone()
             if not row:
                 return None
             return {
@@ -8546,12 +8562,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         Used by the gateway's handoff watcher.
         """
         try:
-            cur = self._conn.execute(
-                "SELECT * FROM sessions "
-                "WHERE handoff_state = 'pending' "
-                "ORDER BY started_at ASC"
-            )
-            return [dict(r) for r in cur.fetchall()]
+            with self._read_ctx() as conn:
+                cur = conn.execute(
+                    "SELECT * FROM sessions "
+                    "WHERE handoff_state = 'pending' "
+                    "ORDER BY started_at ASC"
+                )
+                return [dict(r) for r in cur.fetchall()]
         except Exception:
             return []
 

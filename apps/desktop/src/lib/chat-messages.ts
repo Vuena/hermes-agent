@@ -31,6 +31,30 @@ export type ChatMessage = {
   reactions?: MessageReaction[]
 }
 
+/** Maximum number of rich transcript rows retained by the desktop renderer.
+ *
+ * The durable SQLite transcript and the agent context are intentionally
+ * unaffected. This is only the UI projection: tool-heavy long-running sessions
+ * otherwise build an unbounded assistant-ui/Streamdown tree and can push the
+ * Chromium renderer past 2 GB. */
+export const DESKTOP_TRANSCRIPT_MESSAGE_LIMIT = 50
+
+/** Return a recent, turn-aligned renderer window without copying small arrays. */
+export function windowChatMessages(
+  messages: ChatMessage[],
+  limit: number = DESKTOP_TRANSCRIPT_MESSAGE_LIMIT
+): ChatMessage[] {
+  if (limit <= 0 || messages.length <= limit) {
+    return messages
+  }
+
+  const candidate = messages.length - limit
+  const nextUserTurn = messages.findIndex((message, index) => index >= candidate && message.role === 'user')
+  const start = nextUserTurn >= candidate ? nextUserTurn : candidate
+
+  return messages.slice(start)
+}
+
 export type GatewayEventPayload = {
   text?: string
   rendered?: string

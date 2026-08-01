@@ -322,6 +322,25 @@ def test_numeric_mcp_server_name_does_not_crash_sorted():
     sorted(enabled)
 
 
+def test_malformed_string_mcp_servers_does_not_crash_platform_resolution():
+    """A string mcp_servers (YAML wrote '{}' as a literal) must not crash.
+
+    Regression: config set once wrote mcp_servers: '{}' as a string; the
+    platform toolset resolver called .items() on it and raised AttributeError,
+    which surfaced as a broken Telegram gateway turn.
+    """
+    config = {
+        "platform_toolsets": {"telegram": ["web"]},
+        "mcp_servers": "{}",
+    }
+
+    enabled = _get_platform_tools(config, "telegram")
+
+    # String value is treated as no MCP servers — no crash, no phantom tools
+    assert "web" in enabled
+    assert not any(name.startswith("mcp_") for name in enabled)
+
+
 # ─── Imagegen Backend Picker Wiring ────────────────────────────────────────
 
 

@@ -167,4 +167,18 @@ class TestRuntimeFtsRebuild:
         with pytest.raises(sqlite3.DatabaseError):
             db.append_message("s1", "user", "second corruption")
 
+    def test_transient_no_more_rows_available_is_retried(self, db):
+        """A cursor invalidation race must not abort session persistence."""
+        calls = {"n": 0}
+
+        def _flaky(conn):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise sqlite3.DatabaseError("no more rows available")
+            return "ok"
+
+        assert db._execute_write(_flaky) == "ok"
+        assert calls["n"] == 2
+        assert db._fts_runtime_rebuild_attempted is False
+
 

@@ -12,6 +12,7 @@ diagnostic accessor) — not the wiring into compression.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 import threading
 import time
@@ -223,3 +224,21 @@ def test_concurrent_acquire_only_one_winner(db: SessionDB) -> None:
     assert sum(1 for r in results if r is False) == 7
     # The single winner still owns it
     assert db.get_compression_lock_holder("contended_session") is not None
+
+
+def test_compression_holder_read_uses_read_context(
+    db: SessionDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Diagnostic polling must not share the writer connection without a guard."""
+    calls = []
+
+    @contextmanager
+    def tracked_read_ctx():
+        calls.append("read")
+        with db._lock:
+            yield db._conn
+
+    monkeypatch.setattr(db, "_read_ctx", tracked_read_ctx)
+
+    assert db.get_compression_lock_holder("never_locked") is None
+    assert calls == ["read"]

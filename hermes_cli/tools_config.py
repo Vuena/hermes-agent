@@ -2102,6 +2102,11 @@ def enabled_mcp_server_names(config: dict) -> Set[str]:
     flag or an unrecognized value is treated as enabled.
     """
     mcp_servers = (config or {}).get("mcp_servers") or {}
+    if not isinstance(mcp_servers, dict):
+        # A malformed YAML write (e.g. mcp_servers: '{}' as a literal
+        # string) must be treated as "no MCP servers", not crash the
+        # platform toolset resolver with AttributeError.
+        return set()
     return {
         str(name)
         for name, server_cfg in mcp_servers.items()

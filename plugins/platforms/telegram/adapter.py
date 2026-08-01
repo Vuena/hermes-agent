@@ -2504,7 +2504,7 @@ class TelegramAdapter(BasePlatformAdapter):
         if self.has_fatal_error:
             return
 
-        MAX_NETWORK_RETRIES = 10
+        MAX_NETWORK_RETRIES = 200  # Turkey ISP blocks: default 10 too short
         BASE_DELAY = 5
         MAX_DELAY = 60
 

@@ -12,6 +12,7 @@ flip pending → running, and finishes with ``complete_handoff`` or
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import time
 
 import pytest
@@ -106,6 +107,23 @@ class TestHandoffStateDB:
         db.complete_handoff(sid)
         assert db.get_handoff_state(sid)["state"] == "completed"
         assert db.list_pending_handoffs() == []
+
+    def test_handoff_polling_reads_use_read_context(self, db, monkeypatch):
+        """The gateway watcher must not query on the shared writer connection."""
+        calls = []
+
+        @contextmanager
+        def tracked_read_ctx():
+            calls.append("read")
+            with db._lock:
+                yield db._conn
+
+        monkeypatch.setattr(db, "_read_ctx", tracked_read_ctx)
+
+        db.get_handoff_state("does-not-exist")
+        db.list_pending_handoffs()
+
+        assert calls == ["read", "read"]
 
 
 class TestHandoffCommandRegistration:
