@@ -22,11 +22,13 @@
     "@hermes/ink": "file:./packages/hermes-ink",
     "@hermes/shared": "file:../apps/shared",
     "@nanostores/react": "1.1.0",
+    "dompurify": "3.4.13",
+    "electron": "^41.10.3",
     "ink": "6.8.0",
     "ink-text-input": "6.0.0",
     "nanostores": "1.4.0",
     "react": "19.2.7",
-    "undici": "6.27.0",
+    "undici": "^6.28.0",
     "unicode-animations": "1.0.3"
   },
   "devDependencies": {
