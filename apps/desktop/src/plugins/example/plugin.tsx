@@ -33,6 +33,26 @@ import {
 const $clicks = atom(0)
 const $events = atom(0)
 
+// The gateway stream fires ~30 events/s during a busy turn. Setting the atom
+// per event re-renders the statusbar slot for every one of them — a hot loop
+// on the main thread in long tool-heavy sessions. Accumulate in a plain
+// counter and flush to the atom at most once per second.
+let eventCount = 0
+let eventFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushEventCount() {
+  eventFlushTimer = null
+  $events.set(eventCount)
+}
+
+function countEvent() {
+  eventCount += 1
+
+  if (eventFlushTimer === null) {
+    eventFlushTimer = setTimeout(flushEventCount, 1000)
+  }
+}
+
 function ClickCounter() {
   const count = useValue($clicks)
   const events = useValue($events)
@@ -74,8 +94,9 @@ const plugin: HermesPlugin = {
     $clicks.set(ctx.storage.get('clicks', 0))
     $clicks.listen(clicks => ctx.storage.set('clicks', clicks))
 
-    // Hear the live gateway stream (deltas, lifecycle, tools — everything).
-    host.onEvent('*', () => $events.set($events.get() + 1))
+    // Hear the live gateway stream (deltas, lifecycle, tools — everything),
+    // throttled to one statusbar re-render per second.
+    host.onEvent('*', countEvent)
 
     const reset = () => {
       $clicks.set(0)

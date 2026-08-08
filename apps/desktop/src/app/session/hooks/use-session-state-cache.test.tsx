@@ -493,3 +493,67 @@ describe('useSessionStateCache — cross-thread error isolation', () => {
     expect(cache.getRuntimeIdForStoredSession('stored-A')).toBeNull()
   })
 })
+
+describe('useSessionStateCache — transcript cache windowing', () => {
+  afterEach(() => {
+    cleanup()
+    setActiveSessionId(null)
+  })
+
+  it('bounds the per-session cache with the same turn-aligned window as the view publish', () => {
+    let cache!: Cache
+    setActiveSessionId('window-runtime')
+    render(<Harness activeSessionId="window-runtime" onReady={c => (cache = c)} selectedStoredSessionId="window-stored" />)
+
+    // 120 alternating messages — far past DESKTOP_TRANSCRIPT_MESSAGE_LIMIT (50).
+    const many: ChatMessage[] = Array.from({ length: 120 }, (_, index) => ({
+      id: index % 2 === 0 ? `user-${index}` : `assistant-${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      parts: [{ type: 'text', text: `msg ${index}` }]
+    }))
+
+    act(() => {
+      cache.updateSessionState('window-runtime', state => ({ ...state, messages: many }))
+    })
+
+    const cached = cache.sessionStateByRuntimeIdRef.current.get('window-runtime')?.messages
+    // Windowed to the limit, and the window starts on a user turn.
+    expect(cached!.length).toBeLessThanOrEqual(50)
+    expect(cached![0].role).toBe('user')
+    // The newest messages survive — the in-flight tail is never dropped.
+    expect(cached![cached!.length - 1].id).toBe('assistant-119')
+    expect(cached!.some(message => message.id === 'user-0')).toBe(false)
+  })
+
+  it('keeps the stream bubble intact: the pending assistant message stays after windowing', () => {
+    let cache!: Cache
+    setActiveSessionId('stream-runtime')
+    render(<Harness activeSessionId="stream-runtime" onReady={c => (cache = c)} selectedStoredSessionId="stream-stored" />)
+
+    const before: ChatMessage[] = Array.from({ length: 80 }, (_, index) => ({
+      id: `old-${index}`,
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      parts: [{ type: 'text', text: `old ${index}` }]
+    }))
+
+    act(() => {
+      cache.updateSessionState('stream-runtime', state => ({ ...state, messages: before }))
+    })
+
+    // The streaming turn appends one more user message + a pending assistant bubble.
+    act(() => {
+      cache.updateSessionState('stream-runtime', state => ({
+        ...state,
+        messages: [
+          ...state.messages,
+          { id: 'stream-user', role: 'user', parts: [{ type: 'text', text: 'final turn' }] },
+          { id: 'stream-bubble', role: 'assistant', parts: [{ type: 'text', text: 'streaming…' }], pending: true }
+        ]
+      }))
+    })
+
+    const cached = cache.sessionStateByRuntimeIdRef.current.get('stream-runtime')?.messages
+    expect(cached!.some(message => message.id === 'stream-bubble')).toBe(true)
+    expect(cached!.some(message => message.id === 'stream-user')).toBe(true)
+  })
+})

@@ -2,7 +2,7 @@ import { useStore } from '@nanostores/react'
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
 
 import type { ChatMessage } from '@/lib/chat-messages'
-import { preserveLocalAssistantErrors } from '@/lib/chat-messages'
+import { preserveLocalAssistantErrors, windowChatMessages } from '@/lib/chat-messages'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { persistInFlightTurnState } from '@/lib/inflight-turn-journal'
 import { setMutableRef } from '@/lib/mutable-ref'
@@ -299,18 +299,27 @@ export function useSessionStateCache({
         return previous
       }
 
-      sessionStateByRuntimeIdRef.current.set(sessionId, next)
+      // Bound the per-session transcript cache the same way the view publish
+      // is windowed (windowChatMessages / DESKTOP_TRANSCRIPT_MESSAGE_LIMIT).
+      // The durable SQLite transcript and agent context are unaffected — this
+      // is only the renderer's in-memory projection. Long tool-heavy sessions
+      // otherwise grow ClientSessionState.messages unboundedly and every
+      // ~30/s flush deep-compares a multi-MB array on the main thread
+      // (chatMessageArraysEquivalent), freezing then OOMing the renderer.
+      const windowed = next.messages === previous.messages ? next : { ...next, messages: windowChatMessages(next.messages) }
+
+      sessionStateByRuntimeIdRef.current.set(sessionId, windowed)
       // Crash-survivable turn progress: journal the running turn's visible
       // tail (throttled localStorage write; cleared the moment the turn
       // settles) so a renderer/app death mid-turn can be recovered on resume.
-      persistInFlightTurnState(next)
+      persistInFlightTurnState(windowed)
       // Publishing to $sessionStates automatically fires transition side-effects
       // (watchdog, settle grace, unread marker, compression id rotation) inside
       // publishSessionState — no manual transition call needed.
-      publishSessionState(sessionId, next)
-      syncSessionStateToView(sessionId, next)
+      publishSessionState(sessionId, windowed)
+      syncSessionStateToView(sessionId, windowed)
 
-      return next
+      return windowed
     },
     [ensureSessionState, syncSessionStateToView]
   )
