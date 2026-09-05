@@ -256,6 +256,8 @@ class TestCopilotNormalization:
         assert opencode_model_api_mode("opencode-go", "kimi-k2.5") == "chat_completions"
         assert opencode_model_api_mode("opencode-go", "opencode-go/kimi-k2.5") == "chat_completions"
         assert opencode_model_api_mode("opencode-go", "minimax-m2.5") == "anthropic_messages"
+        assert opencode_model_api_mode("opencode-go", "muse-spark-1.3-contributor") == "codex_responses"
+        assert opencode_model_api_mode("opencode-go", "opencode-go/muse-spark-1.3-contributor") == "codex_responses"
         assert opencode_model_api_mode("opencode-go", "opencode-go/minimax-m2.5") == "anthropic_messages"
         assert opencode_model_api_mode("opencode-go", "qwen3.7-max") == "anthropic_messages"
         assert opencode_model_api_mode("opencode-go", "opencode-go/qwen3.7-max") == "anthropic_messages"

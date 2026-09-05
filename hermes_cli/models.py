@@ -4069,6 +4069,12 @@ def opencode_model_api_mode(provider_id: Optional[str], model_id: Optional[str])
             # All Qwen models on Go (qwen3.7-max, qwen3.7-plus, qwen3.6-plus)
             # are served via /v1/messages per the published Go endpoint table.
             return "anthropic_messages"
+        # Muse Spark is exposed by OpenCode Go on the Responses API only.
+        # The relay returns HTTP 500 for the OpenAI chat surface, which used
+        # to look like a silent Telegram turn because the stream never yielded
+        # a usable final event.
+        if normalized.startswith("muse-spark"):
+            return "codex_responses"
         return "chat_completions"
 
     if provider == "opencode-zen":
