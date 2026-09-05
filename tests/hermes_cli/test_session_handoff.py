@@ -12,8 +12,8 @@ flip pending → running, and finishes with ``complete_handoff`` or
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import time
+from contextlib import contextmanager
 
 import pytest
 
@@ -108,22 +108,25 @@ class TestHandoffStateDB:
         assert db.get_handoff_state(sid)["state"] == "completed"
         assert db.list_pending_handoffs() == []
 
-    def test_handoff_polling_reads_use_read_context(self, db, monkeypatch):
-        """The gateway watcher must not query on the shared writer connection."""
-        calls = []
+    def test_handoff_reads_use_read_context_during_reconnect(self, db, monkeypatch):
+        """Handoff polling must not borrow the reconnectable writer handle."""
+        sid = "sess-read-path"
+        self._make_session(db, sid)
+        db.request_handoff(sid, "discord")
+
+        entered = []
+        original = db._read_ctx
 
         @contextmanager
-        def tracked_read_ctx():
-            calls.append("read")
-            with db._lock:
-                yield db._conn
+        def traced_read_ctx():
+            entered.append(True)
+            with original() as conn:
+                yield conn
 
-        monkeypatch.setattr(db, "_read_ctx", tracked_read_ctx)
-
-        db.get_handoff_state("does-not-exist")
-        db.list_pending_handoffs()
-
-        assert calls == ["read", "read"]
+        monkeypatch.setattr(db, "_read_ctx", traced_read_ctx)
+        assert db.get_handoff_state(sid)["state"] == "pending"
+        assert [row["id"] for row in db.list_pending_handoffs()] == [sid]
+        assert len(entered) == 2
 
 
 class TestHandoffCommandRegistration:
