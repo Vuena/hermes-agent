@@ -301,7 +301,8 @@ def test_shadow_telemetry_preserves_actual_route_metadata(monkeypatch, tmp_path)
 def test_conversation_loop_calls_shadow_observer_after_turn_context():
     from agent import conversation_loop
 
-    source = inspect.getsource(conversation_loop.run_conversation)
+    target_fn = getattr(conversation_loop, "_run_conversation_turn", conversation_loop.run_conversation)
+    source = inspect.getsource(target_fn)
     context_pos = source.index("_ctx = build_turn_context(")
     shadow_pos = source.index("shadow_observe(")
     loop_pos = source.index("while (s.api_call_count")
