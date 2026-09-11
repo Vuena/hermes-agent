@@ -310,8 +310,30 @@ def test_install_scheduled_task_recreates_instead_of_change(monkeypatch, tmp_pat
     # (issue #45599 fix A: no console -> no logon CTRL_CLOSE_EVENT / 0xC000013A).
     assert "<Command>wscript.exe</Command>" in xml_seen["text"]
     assert "//B //Nologo" in xml_seen["text"]
+    assert "/supervised" in xml_seen["text"]
     assert "Hermes_Gateway_alice.vbs" in xml_seen["text"]
     assert "cmd.exe" not in xml_seen["text"]
+
+
+def test_gateway_cmd_script_supervises_explicit_restart(monkeypatch):
+    """Legacy Scheduled Tasks that still target .cmd must relaunch on exit 75."""
+    monkeypatch.setattr(
+        gateway_windows,
+        "_resolve_detached_python",
+        lambda exe: (r"C:\venv\Scripts\python.exe", Path(r"C:\venv"), []),
+    )
+    content = gateway_windows._build_gateway_cmd_script(
+        r"C:\venv\Scripts\python.exe",
+        r"C:\Hermes",
+        r"C:\Hermes",
+        "",
+    )
+    assert 'set "HERMES_SUPERVISED_CHILD=1"' in content
+    assert ":run_gateway" in content
+    assert 'if "%gateway_exit%"=="75" (' in content
+    assert "goto run_gateway" in content
+    assert "exit /b %gateway_exit%" in content
+    assert "exit /b 0" not in content
 
 
 def test_gateway_vbs_script_is_console_less(monkeypatch):
@@ -333,7 +355,11 @@ def test_gateway_vbs_script_is_console_less(monkeypatch):
     assert "pythonw.exe" in content
     assert "hermes_cli.main" in content
     assert "gateway run" in content
-    assert ", 0, False" in content  # hidden window, detached/async
+    assert "WScript.Arguments.Named.Exists(\"supervised\")" in content
+    assert "HERMES_SUPERVISED_CHILD" in content
+    assert "sh.Run(" in content and ", 0, True)" in content
+    assert "WScript.Quit exit_code" in content
+    assert ", 0, False" in content  # Startup fallback stays hidden and detached.
     for var in ("HERMES_HOME", "PYTHONIOENCODING", "HERMES_GATEWAY_DETACHED", "VIRTUAL_ENV", "PYTHONPATH"):
         assert var in content
     assert "--profile" in content and "work" in content

@@ -11,16 +11,30 @@ import pytest
 from agent import global_pre_router as router
 
 
-def test_router_sends_bounded_non_sensitive_short_text_to_nim():
+def test_router_keeps_bounded_non_sensitive_short_text_off_ultra():
     decision = router.decide("Explain in two sentences what a reverse proxy is.")
-    assert decision["route"] == "nim"
-    assert decision["confidence"] >= 0.85
+    assert decision["route"] != "nim"
 
 
-def test_router_sends_general_turkish_routine_to_nim():
+def test_router_keeps_general_turkish_routine_off_ultra():
     decision = router.decide("Evde çalışan biri için verimli bir çalışma rutini oluştur.")
+    assert decision["route"] != "nim"
+
+
+def test_router_sends_multi_source_synthesis_to_nemotron_ultra():
+    decision = router.decide(
+        "Üç kaynak arasındaki çelişkileri çöz ve kaynaklar arası sentez üret."
+    )
     assert decision["route"] == "nim"
-    assert decision["reason"] == "routine_medium_text"
+    assert decision["reason"] == "nemotron_ultra_synthesis"
+
+
+def test_admission_sends_fact_check_to_nemotron_ultra():
+    decision = router.decide_admission(
+        "Bu kaynaklardaki iddialar için kapsamlı fakt kontrolü yap."
+    )
+    assert decision["route"] == "nim"
+    assert decision["reason"] == "nemotron_ultra_synthesis"
 
 
 def test_router_keeps_file_creation_as_tool_action():
@@ -71,6 +85,16 @@ def test_direct_nim_worker_rejects_pii_before_network(monkeypatch):
     assert payload["reason"] == "pii_pattern"
 
 
+def test_worker_plugin_dir_falls_back_from_profile_to_shared_root(monkeypatch, tmp_path):
+    profile_home = tmp_path / "profiles" / "denetci"
+    shared_plugin = tmp_path / "plugins" / "lfm-local-worker"
+    shared_plugin.mkdir(parents=True)
+    (shared_plugin / "__init__.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(router, "_home", lambda: profile_home)
+
+    assert router._worker_plugin_dir() == shared_plugin
+
+
 def test_dispatch_marks_router_request_as_single_user_prompt(monkeypatch):
     seen = {}
 
@@ -85,7 +109,7 @@ def test_dispatch_marks_router_request_as_single_user_prompt(monkeypatch):
             raise AssertionError("LFM must not run on the NIM route")
 
     monkeypatch.setattr(router, "_load_lfm_module", lambda: FakeWorker)
-    result = router.dispatch("Explain in two sentences what a reverse proxy is.")
+    result = router.dispatch("Üç kaynak arasındaki çelişkileri çöz ve kaynaklar arası sentez üret.")
     assert result["handled"] is True
     assert seen["source_is_task"] is True
     assert seen["task"] == seen["text"]
@@ -108,7 +132,7 @@ def test_dispatch_returns_terminal_nim_without_frontier(monkeypatch):
             raise AssertionError("LFM must not run on the NIM route")
 
     monkeypatch.setattr(router, "_load_lfm_module", lambda: FakeWorker)
-    result = router.dispatch("Explain in two sentences what a reverse proxy is.")
+    result = router.dispatch("Üç kaynak arasındaki çelişkileri çöz ve kaynaklar arası sentez üret.")
     assert result is not None
     assert result["handled"] is True
     assert result["route"] == "nim"
@@ -139,7 +163,7 @@ def test_admission_has_four_terminal_routes():
         "Classify this private record: email=test@example.com"
     )["route"] == "local"
     assert router.decide_admission(
-        "Explain in two sentences what a reverse proxy is."
+        "Üç kaynak arasındaki çelişkileri çöz ve kaynaklar arası sentez üret."
     )["route"] == "nim"
     assert router.decide_admission(
         "Write a pure Python function that deduplicates a list while preserving order."
@@ -195,15 +219,15 @@ def test_admission_keeps_explicit_deep_expert_work_on_combo():
 
 
 
-def test_shadow_admission_still_recommends_nim_when_live_router_is_disabled(monkeypatch):
+def test_shadow_admission_still_recommends_ultra_when_live_router_is_disabled(monkeypatch):
     monkeypatch.setattr(router, "_enabled", lambda: False)
 
     decision = router.decide_admission(
-        "Explain in two sentences what a reverse proxy is."
+        "Üç kaynak arasındaki çelişkileri çöz ve kaynaklar arası sentez üret."
     )
 
     assert decision["route"] == "nim"
-    assert decision["reason"] == "routine_medium_text"
+    assert decision["reason"] == "nemotron_ultra_synthesis"
 
 
 def test_dispatch_budget_enforces_two_calls_one_transition_one_combo():
@@ -280,7 +304,7 @@ def test_conversation_loop_calls_shadow_observer_after_turn_context():
     source = inspect.getsource(conversation_loop.run_conversation)
     context_pos = source.index("_ctx = build_turn_context(")
     shadow_pos = source.index("shadow_observe(")
-    loop_pos = source.index("while (api_call_count")
+    loop_pos = source.index("while (s.api_call_count")
 
     assert context_pos < shadow_pos < loop_pos
 

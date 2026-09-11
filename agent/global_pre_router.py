@@ -106,6 +106,13 @@ _ROUTINE_TERMS = re.compile(
     r"[oö]ner\w*|[oö]neri|fikir|alternatif|ipu[cç]lar[iı]|yard[iı]mc[iı] ol)\b",
     re.I,
 )
+_NEMOTRON_ULTRA_TERMS = re.compile(
+    r"(?:\b(?:multi[- ]source synthesis|cross[- ]source synthesis|resolve (?:source )?conflicts?|"
+    r"fact[- ]check|deep source review|evidence synthesis)\b|"
+    r"\b(?:kaynaklar? aras[ıi] sentez|kaynak (?:[cç]eli[sş]k\w*|uzla[sş]mazl[ıi]k\w*)|"
+    r"[cç]eli[sş]k\w* (?:[cç][oö]z|gider)|fakt kontrol\w*|iddia\w* do[gğ]rula|kan[ıi]t sentez\w*)\b)",
+    re.I,
+)
 _FOLLOWUP_REFERENCES = re.compile(
     r"\b(?:this|that|it|these|those|above|below|previous|earlier|continue|again|"
     r"bunu|şunu|onu|bunları|şunları|yukarıdaki|aşağıdaki|önceki|az önce|devam et|tekrar)\b",
@@ -355,6 +362,12 @@ def decide_admission(
             "reason": "complex_expert_reasoning", "privacy_gate": privacy_gate,
             "sensitive": False,
         }
+    if _NEMOTRON_ULTRA_TERMS.search(text) and len(text) <= 24_000:
+        return {
+            "route": "nim", "confidence": 0.91,
+            "reason": "nemotron_ultra_synthesis", "privacy_gate": privacy_gate,
+            "sensitive": False,
+        }
     if _STANDARD_CODE_TERMS.search(text) and len(text) <= 24_000:
         return {
             "route": "muse", "confidence": 0.9, "reason": "standard_code",
@@ -447,6 +460,18 @@ def record_shadow_outcome(
     })
 
 
+def _worker_plugin_dir() -> Path:
+    profile_plugin = _home() / "plugins" / "lfm-local-worker"
+    if (profile_plugin / "__init__.py").is_file():
+        return profile_plugin
+    profile_home = _home()
+    if profile_home.parent.name == "profiles":
+        shared_plugin = profile_home.parent.parent / "plugins" / "lfm-local-worker"
+        if (shared_plugin / "__init__.py").is_file():
+            return shared_plugin
+    return profile_plugin
+
+
 def _load_lfm_module():
     global _LFM_MODULE
     if _LFM_MODULE is not None:
@@ -454,7 +479,7 @@ def _load_lfm_module():
     with _LFM_LOCK:
         if _LFM_MODULE is not None:
             return _LFM_MODULE
-        plugin_dir = _home() / "plugins" / "lfm-local-worker"
+        plugin_dir = _worker_plugin_dir()
         init_path = plugin_dir / "__init__.py"
         if not init_path.is_file():
             raise RuntimeError(f"local worker plugin not found: {plugin_dir}")
@@ -576,6 +601,12 @@ def decide(
         or (_FOLLOWUP_REFERENCES.search(text) and len(text) < 2_000)
     ):
         return {"route": "gpt", "confidence": 0.86, "reason": "stateful_followup", "sensitive": sensitive}
+    if _NEMOTRON_ULTRA_TERMS.search(text) and len(text) <= 24_000 and not sensitive:
+        return {
+            "route": "nim", "confidence": 0.91,
+            "reason": "nemotron_ultra_synthesis", "sensitive": False,
+            "mode": mode or "answer",
+        }
     if _BOUNDED_TERMS.search(text) and len(text) <= 24_000:
         bounded_mode = mode or (
             "code_triage" if re.search(r"code|bug|error|hata|kod", text, re.I)
@@ -583,18 +614,13 @@ def decide(
             else "extract" if re.search(r"extract|parse|[cç][iı]kar|ay[iı]r|json|csv", text, re.I)
             else "summarize"
         )
-        # LFM is the terminal route for private work and for sufficiently large
-        # bounded payloads.  For tiny non-sensitive transformations, NIM is more
-        # economical because the local worker deliberately protects its context
-        # budget with an 800-token threshold.
         if sensitive or len(text) // 4 >= 800:
             return {"route": "lfm", "confidence": 0.9, "reason": "bounded_text", "sensitive": sensitive, "mode": bounded_mode}
-        if not sensitive:
-            return {"route": "nim", "confidence": 0.87, "reason": "small_bounded_text", "sensitive": False, "mode": bounded_mode}
+        return {"route": "gpt", "confidence": 0.87, "reason": "small_bounded_text", "sensitive": False, "mode": bounded_mode}
     if sensitive and _BOUNDED_TERMS.search(text) and len(text) <= 24_000:
         return {"route": "lfm", "confidence": 0.87, "reason": "private_bounded_text", "sensitive": True, "mode": mode or "summarize"}
     if _ROUTINE_TERMS.search(text) and len(text) <= 12_000 and not sensitive:
-        return {"route": "nim", "confidence": 0.88, "reason": "routine_medium_text", "sensitive": False, "mode": mode or "answer"}
+        return {"route": "gpt", "confidence": 0.88, "reason": "routine_medium_text", "sensitive": False, "mode": mode or "answer"}
     if sensitive and source_path and len(text) <= 24_000:
         return {"route": "lfm", "confidence": 0.87, "reason": "private_bounded_text", "sensitive": True, "mode": mode or "summarize"}
     return {"route": "gpt", "confidence": 0.7, "reason": "complex_or_uncertain", "sensitive": sensitive}

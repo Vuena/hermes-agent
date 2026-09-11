@@ -51,7 +51,8 @@ _TASK_LOGON_DELAY = "PT30S"
 _TASK_RESTART_INTERVAL = "PT1M"
 _TASK_RESTART_COUNT = 999
 
-_GATEWAY_ENV = (("PYTHONIOENCODING", "utf-8"), ("HERMES_GATEWAY_DETACHED", "1"), ("HERMES_SUPERVISED_CHILD", "1"))
+_GATEWAY_ENV = (("PYTHONIOENCODING", "utf-8"), ("HERMES_GATEWAY_DETACHED", "1"))
+_WINDOWS_TASK_SUPERVISOR_ENV = ("HERMES_SUPERVISED_CHILD", "1")
 
 
 def _schtasks_encoding() -> str:
@@ -318,8 +319,17 @@ def _build_gateway_cmd_script(python_path: str, working_dir: str, hermes_home: s
         # VIRTUAL_ENV lets the gateway's own python detection find the venv.
         f'set "VIRTUAL_ENV={_preserve_hermes_home_path(venv_dir)}"',
         f'set "PYTHONPATH={pythonpath}"',
+        f'set "{_WINDOWS_TASK_SUPERVISOR_ENV[0]}={_WINDOWS_TASK_SUPERVISOR_ENV[1]}"',
+        ":run_gateway",
         " ".join(_quote_cmd_script_arg(a) for a in _gateway_run_argv(python_exe_path, profile_arg)),
-        "exit /b 0",
+        'set "gateway_exit=%ERRORLEVEL%"',
+        # Exit 75 is the gateway's explicit service-restart request. Legacy Scheduled Tasks launch this
+        # compatibility .cmd directly and may not have RestartOnFailure, so supervise it here too.
+        'if "%gateway_exit%"=="75" (',
+        "  timeout /t 1 /nobreak >nul",
+        "  goto run_gateway",
+        ")",
+        "exit /b %gateway_exit%",
     ]
     return "\r\n".join(lines) + "\r\n"
 
@@ -349,11 +359,14 @@ def _build_gateway_vbs_script(python_path: str, working_dir: str, hermes_home: s
     lines = [
         f"' {_TASK_DESCRIPTION}",
         "Option Explicit",
-        "Dim sh, env, existing_pp",
+        "Dim sh, env, existing_pp, exit_code",
         'Set sh = CreateObject("WScript.Shell")',
         'Set env = sh.Environment("PROCESS")',
         f"env.Item({q('HERMES_HOME')}) = {q(hermes_home)}",
         *[f"env.Item({q(k)}) = {q(v)}" for k, v in _GATEWAY_ENV],
+        "If WScript.Arguments.Named.Exists(\"supervised\") Then",
+        f"  env.Item({q(_WINDOWS_TASK_SUPERVISOR_ENV[0])}) = {q(_WINDOWS_TASK_SUPERVISOR_ENV[1])}",
+        "End If",
         f"env.Item({q('VIRTUAL_ENV')}) = {q(_preserve_hermes_home_path(venv_dir))}",
         # Mirror the cmd wrapper's ``PYTHONPATH=<static>;%PYTHONPATH%`` at runtime.
         f"existing_pp = env.Item({q('PYTHONPATH')})",
@@ -363,8 +376,14 @@ def _build_gateway_vbs_script(python_path: str, working_dir: str, hermes_home: s
         f"  env.Item({q('PYTHONPATH')}) = {q(static_pythonpath)}",
         "End If",
         f"sh.CurrentDirectory = {q(working_dir)}",
-        # Window style 0 = hidden; bWaitOnReturn False = detached/async.
-        f"sh.Run {q(command_line)}, 0, False",
+        # Scheduled Task mode must own the child lifetime so RestartOnFailure sees exit 75.
+        # Startup fallback remains detached to avoid pinning a second launcher process.
+        "If WScript.Arguments.Named.Exists(\"supervised\") Then",
+        f"  exit_code = sh.Run({q(command_line)}, 0, True)",
+        "  WScript.Quit exit_code",
+        "Else",
+        f"  sh.Run {q(command_line)}, 0, False",
+        "End If",
     ]
     return "\r\n".join(lines) + "\r\n"
 
@@ -470,7 +489,7 @@ def _build_scheduled_task_xml(task_name: str, launcher_path: Path, user: str | N
   <Actions Context="Author">
     <Exec>
       <Command>wscript.exe</Command>
-      <Arguments>//B //Nologo "{escape(str(launcher_path))}"</Arguments>
+      <Arguments>//B //Nologo "{escape(str(launcher_path))}" /supervised</Arguments>
     </Exec>
   </Actions>
 </Task>

@@ -95,7 +95,7 @@ async def test_retry_exhaustion_queues_reconnect_before_child_disconnect(tmp_pat
     )
     runner = GatewayRunner(config)
     adapter = _make_adapter()
-    adapter._polling_network_error_count = 10  # MAX_NETWORK_RETRIES
+    adapter._polling_network_error_count = 200  # MAX_NETWORK_RETRIES
     adapter.set_fatal_error_handler(runner._handle_adapter_fatal_error)
     runner.adapters = {Platform.TELEGRAM: adapter}
     runner.delivery_router.adapters = runner.adapters

@@ -38,6 +38,7 @@ def _make_runner_with_mock_restart(tmp_path, monkeypatch):
     monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
     monkeypatch.delenv("INVOCATION_ID", raising=False)
     monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+    monkeypatch.delenv("HERMES_SUPERVISED_CHILD", raising=False)
     monkeypatch.delenv("HERMES_S6_SUPERVISED_CHILD", raising=False)
     monkeypatch.delenv(EXTERNAL_GATEWAY_SUPERVISOR_ENV, raising=False)
     # Hermeticity: neutralize the real container probe — on a containerized
@@ -59,6 +60,19 @@ async def test_restart_with_external_supervisor_marker_uses_service_path(
     """Wrapped supervisors can retain restart ownership without native markers."""
     runner = _make_runner_with_mock_restart(tmp_path, monkeypatch)
     monkeypatch.setenv(EXTERNAL_GATEWAY_SUPERVISOR_ENV, "1")
+
+    await runner._handle_restart_command(_make_restart_event())
+
+    runner.request_restart.assert_called_once_with(detached=False, via_service=True)
+
+
+@pytest.mark.asyncio
+async def test_restart_with_windows_task_supervisor_marker_uses_service_path(
+    tmp_path, monkeypatch
+):
+    """The Windows Scheduled Task child exits 75 so RestartOnFailure relaunches it."""
+    runner = _make_runner_with_mock_restart(tmp_path, monkeypatch)
+    monkeypatch.setenv("HERMES_SUPERVISED_CHILD", "1")
 
     await runner._handle_restart_command(_make_restart_event())
 

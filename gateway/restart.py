@@ -63,7 +63,8 @@ def is_gateway_supervisor_process(environ: Mapping[str, str] | None = None) -> b
     """Return whether this gateway process is owned by a supervisor."""
     env = os.environ if environ is None else environ
     xpc_service = env.get("XPC_SERVICE_NAME", "")
-    return bool(env.get("INVOCATION_ID") or env.get("HERMES_S6_SUPERVISED_CHILD") or (xpc_service and xpc_service != "0")
+    return bool(env.get("INVOCATION_ID") or env.get("HERMES_SUPERVISED_CHILD")
+                or env.get("HERMES_S6_SUPERVISED_CHILD") or (xpc_service and xpc_service != "0")
                 or str(env.get(EXTERNAL_GATEWAY_SUPERVISOR_ENV, "")).strip().lower() in _TRUTHY)
 
 

@@ -41,6 +41,57 @@ def test_get_git_banner_state_reads_origin_and_head(tmp_path):
     assert state == {"upstream": "b2f477a3", "local": "af8aad31", "ahead": 3}
 
 
+def test_check_via_local_git_https_official_remote_uses_upstream_probe(tmp_path):
+    """HTTPS official remotes must use the same fresh upstream probe as SSH remotes."""
+    from hermes_cli import banner
+
+    repo_dir = tmp_path / "repo"
+    (repo_dir / ".git").mkdir(parents=True)
+
+    def fake_git_stdout(args, *, cwd, timeout=5):
+        if args == ["remote", "get-url", "origin"]:
+            return "https://github.com/NousResearch/hermes-agent.git"
+        if args == ["rev-parse", "HEAD"]:
+            return "b" * 40
+        raise AssertionError(f"unexpected git call: {args}")
+
+    with (
+        patch.object(banner, "_git_stdout", side_effect=fake_git_stdout),
+        patch.object(banner, "_upstream_main_sha", return_value="a" * 40),
+        patch.object(banner.subprocess, "run", return_value=MagicMock(returncode=0)),
+    ):
+        behind = banner._check_via_local_git(repo_dir)
+
+    assert behind == 0
+
+
+def test_check_via_local_git_fork_uses_official_upstream_remote(tmp_path):
+    """Fork origin must not make a local checkout look current when upstream moved."""
+    from hermes_cli import banner
+
+    repo_dir = tmp_path / "repo"
+    (repo_dir / ".git").mkdir(parents=True)
+
+    def fake_git_stdout(args, *, cwd, timeout=5):
+        if args == ["remote", "get-url", "origin"]:
+            return "https://github.com/Vuena/hermes-agent.git"
+        if args == ["remote", "get-url", "upstream"]:
+            return "https://github.com/NousResearch/hermes-agent.git"
+        if args == ["rev-parse", "HEAD"]:
+            return "b" * 40
+        raise AssertionError(f"unexpected git call: {args}")
+
+    with (
+        patch.object(banner, "_git_stdout", side_effect=fake_git_stdout),
+        patch.object(banner, "_upstream_main_sha", return_value="a" * 40),
+        patch.object(banner.subprocess, "run", return_value=MagicMock(returncode=1)),
+        patch.object(banner, "_github_compare_behind", return_value=894),
+    ):
+        behind = banner._check_via_local_git(repo_dir)
+
+    assert behind == 894
+
+
 def test_check_via_local_git_ssh_fastpath_ahead_not_behind(tmp_path):
     """SSH fast path must not report an ahead (carried) HEAD as behind.
 

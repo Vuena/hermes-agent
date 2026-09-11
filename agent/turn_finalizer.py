@@ -630,6 +630,21 @@ def finalize_turn(
         platform=_platform,
     )
 
+    from agent.global_pre_router import record_shadow_outcome
+
+    record_shadow_outcome(
+        request_id=str(turn_id or ""),
+        actual_provider=str(agent.provider or ""),
+        actual_model=str(agent.model or ""),
+        api_calls=int(api_call_count or 0),
+        input_tokens=result.get("session_input_tokens"),
+        output_tokens=result.get("session_output_tokens"),
+        completed=bool(completed),
+        failed=bool(failed),
+        interrupted=bool(interrupted),
+        stop_reason=str(_turn_exit_reason or ""),
+    )
+
     agent._turn_preflight_display_snapshot = None
     agent._turn_received_provider_response = False
     return result

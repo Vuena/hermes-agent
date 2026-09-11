@@ -160,8 +160,9 @@ async def test_request_restart_is_idempotent():
 
 
 @pytest.mark.asyncio
-async def test_request_restart_defers_stop_until_active_turn_finishes():
+async def test_request_restart_defers_stop_until_active_turn_finishes(monkeypatch):
     """Regression for #77184: requesting turn must not enter the drain set."""
+    monkeypatch.setattr(gateway_run.sys, "platform", "linux")
     runner, _adapter = make_restart_runner()
     runner.stop = AsyncMock()
     runner._launch_detached_restart_command = AsyncMock()
@@ -184,8 +185,25 @@ async def test_request_restart_defers_stop_until_active_turn_finishes():
     runner.stop.assert_awaited_once_with(
         restart=True, detached_restart=False, service_restart=True
     )
-    # Detached helper is only for the non-service path.
+    # Non-Windows service managers own the relaunch; no detached fallback is needed.
     runner._launch_detached_restart_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_windows_service_restart_arms_breakaway_start_fallback(monkeypatch):
+    """A Windows task-tree termination must not strand the gateway after /restart."""
+    runner, _adapter = make_restart_runner()
+    runner.stop = AsyncMock()
+    runner._launch_detached_restart_command = AsyncMock()
+    monkeypatch.setattr(gateway_run.sys, "platform", "win32")
+
+    assert runner.request_restart(detached=False, via_service=True) is True
+    await runner._restart_task
+
+    runner._launch_detached_restart_command.assert_awaited_once_with()
+    runner.stop.assert_awaited_once_with(
+        restart=True, detached_restart=False, service_restart=True
+    )
 
 
 @pytest.mark.asyncio
@@ -300,7 +318,7 @@ async def test_windows_detached_restart_scrubs_gateway_marker(monkeypatch, tmp_p
 
     assert len(popen_calls) == 1
     cmd, kwargs = popen_calls[0]
-    assert cmd[-3:] == ["hermes", "gateway", "restart"]
+    assert cmd[-3:] == ["hermes", "gateway", "start"]
     assert kwargs["env"].get("_HERMES_GATEWAY") is None
     assert kwargs["env"]["VIRTUAL_ENV"] == str(venv_dir)
     assert str(site_packages) in kwargs["env"]["PYTHONPATH"].split(gateway_run.os.pathsep)
@@ -349,7 +367,7 @@ async def test_windows_detached_restart_watcher_keeps_console_python(monkeypatch
     assert len(popen_calls) == 1
     cmd, kwargs = popen_calls[0]
     assert cmd[0] == r"C:\venv\Scripts\python.exe"
-    assert cmd[-3:] == ["hermes", "gateway", "restart"]
+    assert cmd[-3:] == ["hermes", "gateway", "start"]
     assert kwargs["creationflags"] == 0x08000200
 
 

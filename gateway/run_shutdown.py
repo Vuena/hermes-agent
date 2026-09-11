@@ -1247,7 +1247,7 @@ class GatewayShutdownMixin:
             watcher_env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(pythonpath))
         watcher_argv = [
             watcher_python, "-c", _WINDOWS_RESTART_WATCHER,
-            str(current_pid), str(restart_after_s), *hermes_cmd, "gateway", "restart",
+            str(current_pid), str(restart_after_s), *hermes_cmd, "gateway", "start",
         ]
         popen_kwargs = dict(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=watcher_env)
         # Break away from the parent CLI's job object or be reaped when the CLI exits; a job without
@@ -1404,7 +1404,11 @@ class GatewayShutdownMixin:
         async def _run_restart() -> None:
             await self._await_active_work_before_restart()
             # Detached helper only AFTER the after-turn wait, or its drain_timeout+5 deadline fires mid-turn.
-            if detached:
+            # Windows Scheduled Tasks occasionally terminate the cmd/task tree before exit 75 reaches the
+            # launcher.  Arm the breakaway watcher as a fallback while retaining the service exit code; it
+            # runs ``gateway start`` after this PID disappears, so a successful launcher relaunch is a no-op.
+            watcher_fallback = via_service and sys.platform == "win32"
+            if detached or watcher_fallback:
                 with _log_suppressed(logging.ERROR, "Failed to launch detached gateway restart helper: %s"):
                     await self._launch_detached_restart_command()
             await asyncio.sleep(0.05)

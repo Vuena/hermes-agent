@@ -151,9 +151,12 @@ def _canonical_github_remote(url: str | None) -> str:
     return value.strip().rstrip("/").removesuffix(".git").lower()
 
 
+def _is_official_remote(url: str | None) -> bool:
+    return bool(url) and _canonical_github_remote(url) == _OFFICIAL_REPO_CANONICAL
+
+
 def _is_official_ssh_remote(url: str | None) -> bool:
-    return bool(url) and url.strip().lower().startswith(("git@", "ssh://")) and (
-        _canonical_github_remote(url) == _OFFICIAL_REPO_CANONICAL)
+    return bool(url) and url.strip().lower().startswith(("git@", "ssh://")) and _is_official_remote(url)
 
 
 _GIT_TEXT_KW = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -261,17 +264,26 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
 
 
 def _check_via_local_git(repo_dir: Path) -> Optional[int]:
-    """Count commits behind origin/main in a local checkout."""
+    """Count commits behind the official Hermes main in a local checkout.
+
+    Fork checkouts commonly keep the official repository as an ``upstream`` remote while
+    ``origin`` points at a fork carrying local patches.  The update check must follow that
+    explicit upstream instead of treating the fork's branch as the release source.
+    """
     origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
-    if _is_official_ssh_remote(origin_url):
+    if _is_official_remote(origin_url):
+        use_official_tip = True
+    else:
+        upstream_url = _git_stdout(["remote", "get-url", "upstream"], cwd=repo_dir)
+        use_official_tip = _is_official_remote(upstream_url)
+    if use_official_tip:
         head_rev = _git_stdout(["rev-parse", "HEAD"], cwd=repo_dir)
         if not head_rev:
             return None
         # Passive probe via HTTPS ls-remote (never SSH — no hardware-key prompts). Tip SHAs alone
-        # can't distinguish "behind" from a local commit AHEAD of origin/main, and misreporting an
-        # ahead checkout nudges the user into `hermes update`, which can wipe carried work — hence
-        # the ancestor check, against the FRESH upstream SHA (a stale tracking ref can't fake an
-        # up-to-date report).
+        # can't distinguish "behind" from a local commit AHEAD of main, and misreporting an ahead
+        # checkout nudges the user into `hermes update`, which can wipe carried work — hence the
+        # ancestor check against the FRESH upstream SHA (a stale tracking ref can't fake currentness).
         return _tips_behind(head_rev, _upstream_main_sha(), repo_dir)
 
     # Installer checkouts are shallow (`git clone --depth 1`): a plain `git fetch` would unshallow
@@ -325,7 +337,8 @@ def check_for_updates() -> Optional[int]:
     """Check whether a Hermes update is available.
 
     If ``HERMES_REVISION`` is set (nix builds embed it), compare it to upstream main via
-    ``git ls-remote``; otherwise count commits behind ``origin/main`` in the local checkout.
+    ``git ls-remote``; otherwise compare a local checkout against the official repository
+    (or its explicit ``upstream`` remote for fork checkouts).
     """
     cache_file = get_hermes_home() / ".update_check"
     embedded_rev = os.environ.get("HERMES_REVISION") or None

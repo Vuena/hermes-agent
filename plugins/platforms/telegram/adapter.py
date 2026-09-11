@@ -1920,7 +1920,7 @@ class TelegramAdapter(BasePlatformAdapter):
         cap) up to MAX_NETWORK_RETRIES, then retryable-fatal so the supervisor restarts the gateway."""
         if self._teardown_started or self.has_fatal_error:
             return
-        MAX_NETWORK_RETRIES = 10
+        MAX_NETWORK_RETRIES = 200
         BASE_DELAY = 5
         MAX_DELAY = 60
         self._polling_network_error_count += 1

@@ -37,6 +37,7 @@ from agent.turn_api_error import handle_api_error
 from agent.turn_api_request import build_api_request
 from agent.turn_final_response import finish_text_response
 from agent.turn_finalizer import finalize_turn
+from agent.global_pre_router import append_terminal_result, dispatch, shadow_observe
 from agent.turn_iteration_prep import (
     announce_api_call,
     apply_retry_restarts,
@@ -1446,6 +1447,29 @@ def run_conversation(
         )
     except PreflightCompressionTimedOut as _preflight_timeout_exc:
         return _preflight_timeout_result(agent, _preflight_timeout_exc, conversation_history)
+
+    # Observe every normal turn without changing dispatch. When the pre-router is
+    # explicitly enabled, a successful bounded terminal route returns before the
+    # frontier API loop; failures remain fail-open and continue normally.
+    if moa_config is None and agent.api_mode != "codex_app_server":
+        _route_request_id = str(getattr(_ctx, "turn_id", task_id) or "")
+        _route_platform = str(getattr(agent, "platform", "") or "")
+        shadow_observe(
+            user_message,
+            conversation_history=conversation_history,
+            platform=_route_platform,
+            actual_provider=str(getattr(agent, "provider", "") or ""),
+            actual_model=str(getattr(agent, "model", "") or ""),
+            request_id=_route_request_id,
+        )
+        _terminal = dispatch(
+            user_message,
+            conversation_history=conversation_history,
+            platform=_route_platform,
+            request_id=_route_request_id,
+        )
+        if _terminal is not None:
+            return append_terminal_result(agent, _ctx, _terminal)
 
     # Per-turn agent state (the gateway caches agents across turns, so none of this may
     # leak into the next message): interim-commentary dedup spans the whole turn but not
