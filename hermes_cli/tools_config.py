@@ -432,6 +432,8 @@ def enabled_mcp_server_names(config: dict) -> Set[str]:
     from tools.mcp_tool_common import mcp_server_enabled
 
     mcp_servers = (config or {}).get("mcp_servers") or {}
+    if not isinstance(mcp_servers, dict):  # `hermes config set mcp_servers '{}'` can persist a string
+        mcp_servers = {}
     names = {
         str(name) for name, server_cfg in mcp_servers.items()
         if isinstance(server_cfg, dict) and mcp_server_enabled(server_cfg)

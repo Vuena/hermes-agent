@@ -79,7 +79,7 @@ def _configure_mcp_tools_interactive(config: dict):
     from hermes_cli.tools_config import save_config
 
     mcp_servers = config.get("mcp_servers") or {}
-    if not mcp_servers:
+    if not isinstance(mcp_servers, dict) or not mcp_servers:
         _print_info("No MCP servers configured.")
         return
 
